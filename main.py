@@ -164,6 +164,9 @@ async def process_video(video_url: str, num_frames: int = 5):
 
 def capture_frames(video_url, output_folder='frames', num_frames=5):
     image_paths = []
+    # Ensure that the directory exists or create it
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
     try:
         yt = YouTube(video_url)
         stream = yt.streams.filter(file_extension='mp4', res='360p').first()
