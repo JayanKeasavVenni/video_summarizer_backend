@@ -107,7 +107,11 @@ async def process_video(video_url: str, num_frames: int = 5):
         # Get the transcript for the video
         youtube = build('youtube', 'v3', developerKey=yt_api_key)
         captions = youtube.captions().list(part='snippet', videoId=video_id).execute()
-        caption = captions['items'][0]['id']
+        if 'items' in captions and captions['items']:
+            caption = captions['items'][0]['id']
+        else:
+            # Return an error response when there are no captions
+            return JSONResponse(content={"error": "No captions found for the video."}, status_code=404)
 
         video_response = youtube.videos().list(part='snippet', id=video_id).execute()
         thumbnails = video_response['items'][0]['snippet']['thumbnails']
