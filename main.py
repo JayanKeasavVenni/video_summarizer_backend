@@ -53,7 +53,7 @@ def create_video(images_folder, text, output_path):
     image_files = sorted([f for f in os.listdir(images_folder) if f.endswith(('.png', '.jpg', '.jpeg'))])
     
     # Create ImageClips from images
-    clips = [ImageClip(os.path.join(images_folder, img)).set_duration(250) for img in image_files]
+    clips = [ImageClip(os.path.join(images_folder, img)).set_duration(3) for img in image_files]
 
     # Add text narration
     text_clip = TextClip(text, fontsize=30, color='white').set_duration(len(clips) * 3)
