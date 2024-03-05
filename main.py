@@ -23,7 +23,7 @@ from hugchat.message import Message
 
 import openai
 from fastapi.middleware.cors import CORSMiddleware
-
+import re
 
 load_dotenv()
 
@@ -53,7 +53,7 @@ def create_video(images_folder, text, output_path):
     image_files = sorted([f for f in os.listdir(images_folder) if f.endswith(('.png', '.jpg', '.jpeg'))])
     
     # Create ImageClips from images
-    clips = [ImageClip(os.path.join(images_folder, img)).set_duration(3) for img in image_files]
+    clips = [ImageClip(os.path.join(images_folder, img)).set_duration(250) for img in image_files]
 
     # Add text narration
     text_clip = TextClip(text, fontsize=30, color='white').set_duration(len(clips) * 3)
@@ -102,16 +102,15 @@ async def root():
 async def process_video(video_url: str, num_frames: int = 5):
     try:
         # Extract video ID from the video link
-        video_id = video_url.split('v=')[1]
-
+        video_id = get_youtube_video_id(video_url)
+        print("video_id",video_id)
         # Get the transcript for the video
         youtube = build('youtube', 'v3', developerKey=yt_api_key)
         captions = youtube.captions().list(part='snippet', videoId=video_id).execute()
         if 'items' in captions and captions['items']:
             caption = captions['items'][0]['id']
         else:
-            # Return an error response when there are no captions
-            return JSONResponse(content={"error": "No captions found for the video."}, status_code=404)
+            caption = None
 
         video_response = youtube.videos().list(part='snippet', id=video_id).execute()
         thumbnails = video_response['items'][0]['snippet']['thumbnails']
@@ -218,3 +217,18 @@ def images_to_video(image_folder_path: str, fps, extension:str, video_name:str, 
     except Exception as e:
         return {"success": False, "errors": f"Error creating video: {str(e)}"}
     
+
+def get_youtube_video_id(link):
+
+ 
+    patterns = [
+        r"youtube\.com/watch\?.*?v=([^&#]*)",  # Standard watch links
+        r"youtu\.be/([^?#]*)",  # Shortened links
+    ]
+ 
+    for pattern in patterns:
+        match = re.search(pattern, link)
+        if match:
+            return match.group(1)
+ 
+    return None
