@@ -105,61 +105,66 @@ async def process_video(video_url: str, num_frames: int = 10):
         video_id = get_youtube_video_id(video_url)
         print("video_id",video_id)
         # Get the transcript for the video
-        youtube = build('youtube', 'v3', developerKey=yt_api_key)
-        captions = youtube.captions().list(part='snippet', videoId=video_id).execute()
-        if 'items' in captions and captions['items']:
-            caption = captions['items'][0]['id']
-        else:
-            caption = None
-
-        video_response = youtube.videos().list(part='snippet', id=video_id).execute()
-        thumbnails = video_response['items'][0]['snippet']['thumbnails']
-
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
-        transcript_txt = ""
-
-        for transcript in transcript_list:
-            transcript_txt += transcript['text']
-
-        summary = ""
-        images = []
-
-        if transcript_txt != "":
-            # Log in to huggingface and grant authorization to huggingchat
-            sign = Login(huggingface_username, huggingface_pwd)
-            cookies = sign.login()
-
-            # Save cookies to the local directory
-            cookie_path_dir = "./cookies_snapshot"
-            sign.saveCookiesToDir(cookie_path_dir)
-
-            # Create a ChatBot
-            chatbot = hugchat.ChatBot(cookies=cookies.get_dict())
-
-            # Extract the summary from the response
-            message = chatbot.query(
-                "Summarize in 10 lines if the given data is more than 10 lines: " + transcript_txt)
-            print(message[0],'ytr')
-            # Extract the text from the Message object
-            summary = message.text if hasattr(
-                message, 'text') else str(message)
-
-        try:
-            # Capture frames directly from the YouTube video stream
-            output_frames_folder = "frames"
-            images = capture_frames(
-                video_url, output_frames_folder, num_frames)
-        except Exception as e:
-            print(f"Error capturing frames: {e}")
-        video_file = None
-        if summary is not None and images is not None:
-            video_generation = images_to_video("frames", 54, '.png', 'summary_video', '.mp4', summary) 
-            if video_generation is not None and 'errors' in video_generation:
-                return JSONResponse(content={ "success": False, "errors": video_generation['errors']})
+        videoExist = check_file_exists(video_id, ".mp4")
+        print(videoExist,"ss")
+        if not videoExist : 
+            youtube = build('youtube', 'v3', developerKey=yt_api_key)
+            captions = youtube.captions().list(part='snippet', videoId=video_id).execute()
+            if 'items' in captions and captions['items']:
+                caption = captions['items'][0]['id']
             else:
-                video_file = video_generation['video_file']
-        return JSONResponse(content={ "success": True,"summary": summary, "images": images, "video_file": video_file})
+                caption = None
 
+            video_response = youtube.videos().list(part='snippet', id=video_id).execute()
+            thumbnails = video_response['items'][0]['snippet']['thumbnails']
+
+            transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
+            transcript_txt = ""
+
+            for transcript in transcript_list:
+                transcript_txt += transcript['text']
+
+            summary = ""
+            images = []
+
+            if transcript_txt != "":
+                # Log in to huggingface and grant authorization to huggingchat
+                sign = Login(huggingface_username, huggingface_pwd)
+                cookies = sign.login()
+
+                # Save cookies to the local directory
+                cookie_path_dir = "./cookies_snapshot"
+                sign.saveCookiesToDir(cookie_path_dir)
+
+                # Create a ChatBot
+                chatbot = hugchat.ChatBot(cookies=cookies.get_dict())
+
+                # Extract the summary from the response
+                message = chatbot.query(
+                    "Summarize in 10 lines if the given data is more than 10 lines: " + transcript_txt)
+                print(message[0],'ytr')
+                # Extract the text from the Message object
+                summary = message.text if hasattr(
+                    message, 'text') else str(message)
+
+            try:
+                # Capture frames directly from the YouTube video stream
+                output_frames_folder = "frames"
+                images = capture_frames(
+                    video_url, output_frames_folder, num_frames)
+            except Exception as e:
+                print(f"Error capturing frames: {e}")
+            video_file = None
+            if summary is not None and images is not None:
+                video_generation = images_to_video("frames", 54, '.png', video_id, '.mp4', summary) 
+                if video_generation is not None and 'errors' in video_generation:
+                    return JSONResponse(content={ "success": False, "errors": video_generation['errors']})
+                else:
+                    video_file = video_generation['video_file']
+            return JSONResponse(content={ "success": True,"summary": summary, "images": images, "video_file": video_file})
+        else :
+            video_file=f'{video_id}.mp4'
+            return JSONResponse(content={ "success": True, "video_file": video_file})
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Error processing video: {str(e)}")
@@ -266,3 +271,15 @@ def get_youtube_video_id(link):
         return match.group(0)
     else:
         return None
+    
+def check_file_exists(file_name, output_format):
+    # Construct the full path where the file would be located
+    file_path = os.path.join("static", f"{file_name}{output_format}")
+    
+    # Check if the file exists
+    if os.path.exists(file_path):
+        print(f"The file {file_path} already exists.")
+        return True
+    else:
+        print(f"The file {file_path} does not exist.")
+        return False
