@@ -172,45 +172,47 @@ async def process_video(video_url: str, num_frames: int = 10):
 
 
 def capture_frames(video_url, output_folder='frames', interval=10):
-    shutil.rmtree(output_folder)
-    image_paths = []
-    # Ensure that the directory exists or create it
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
+    if  os.path.exists(output_folder):
+        shutil.rmtree(output_folder)
+    else:
+        image_paths = []
+        # Ensure that the directory exists or create it
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
 
-    try:
-        # Initialize pytube to capture video stream
-        yt = YouTube(video_url)
-        stream = yt.streams.filter(file_extension='mp4', res='360p').first()
+        try:
+            # Initialize pytube to capture video stream
+            yt = YouTube(video_url)
+            stream = yt.streams.filter(file_extension='mp4', res='360p').first()
 
-        # Use OpenCV to capture frames from the video stream
-        cap = cv2.VideoCapture(stream.url)
+            # Use OpenCV to capture frames from the video stream
+            cap = cv2.VideoCapture(stream.url)
 
-        # Calculate the number of frames to skip based on the desired interval (10 seconds)
-        fps = cap.get(cv2.CAP_PROP_FPS)  # Frame rate
-        skip_frames = int(fps * interval)
-        frame_count = 0
-        success, image = cap.read()
-        current_frame = 0
-
-        while success:
-            # Capture frame if it's on the desired interval
-            if current_frame % skip_frames == 0:
-                frame_count += 1
-                frame_path = f"{output_folder}/frame_{frame_count}.png"
-                cv2.imwrite(frame_path, image)
-                image_paths.append(os.path.abspath(frame_path))
-            
-            # Skip to the next frame for the next interval
+            # Calculate the number of frames to skip based on the desired interval (10 seconds)
+            fps = cap.get(cv2.CAP_PROP_FPS)  # Frame rate
+            skip_frames = int(fps * interval)
+            frame_count = 0
             success, image = cap.read()
-            current_frame += 1
+            current_frame = 0
 
-        cap.release()
-        print(f"Frames captured at {interval}-second intervals.")
-    except Exception as e:
-        print(f"Error capturing frames: {e}")
+            while success:
+                # Capture frame if it's on the desired interval
+                if current_frame % skip_frames == 0:
+                    frame_count += 1
+                    frame_path = f"{output_folder}/frame_{frame_count}.png"
+                    cv2.imwrite(frame_path, image)
+                    image_paths.append(os.path.abspath(frame_path))
+                
+                # Skip to the next frame for the next interval
+                success, image = cap.read()
+                current_frame += 1
 
-    return image_paths
+            cap.release()
+            print(f"Frames captured at {interval}-second intervals.")
+        except Exception as e:
+            print(f"Error capturing frames: {e}")
+
+        return image_paths
 def text_to_speech(text):
     # Initialize gTTS with the text to convert
     speech = gTTS(text)
