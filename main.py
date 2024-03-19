@@ -1,3 +1,4 @@
+import shutil
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
 from moviepy.editor import *
@@ -171,6 +172,7 @@ async def process_video(video_url: str, num_frames: int = 10):
 
 
 def capture_frames(video_url, output_folder='frames', interval=10):
+    shutil.rmtree(output_folder)
     image_paths = []
     # Ensure that the directory exists or create it
     if not os.path.exists(output_folder):
