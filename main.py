@@ -99,7 +99,7 @@ async def root():
 
 
 @app.get("/process_video")
-async def process_video(video_url: str, num_frames: int = 5):
+async def process_video(video_url: str, num_frames: int = 10):
     try:
         # Extract video ID from the video link
         video_id = get_youtube_video_id(video_url)
@@ -165,33 +165,45 @@ async def process_video(video_url: str, num_frames: int = 5):
             status_code=500, detail=f"Error processing video: {str(e)}")
 
 
-def capture_frames(video_url, output_folder='frames', num_frames=5):
+def capture_frames(video_url, output_folder='frames', interval=10):
     image_paths = []
     # Ensure that the directory exists or create it
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
+
     try:
+        # Initialize pytube to capture video stream
         yt = YouTube(video_url)
         stream = yt.streams.filter(file_extension='mp4', res='360p').first()
 
+        # Use OpenCV to capture frames from the video stream
         cap = cv2.VideoCapture(stream.url)
+
+        # Calculate the number of frames to skip based on the desired interval (10 seconds)
+        fps = cap.get(cv2.CAP_PROP_FPS)  # Frame rate
+        skip_frames = int(fps * interval)
         frame_count = 0
         success, image = cap.read()
+        current_frame = 0
 
-        while success and frame_count < num_frames:
-            frame_count += 1
-            frame_path = f"{output_folder}/frame_{frame_count}.png"
-            cv2.imwrite(frame_path, image)
-            image_paths.append(os.path.abspath(frame_path))
+        while success:
+            # Capture frame if it's on the desired interval
+            if current_frame % skip_frames == 0:
+                frame_count += 1
+                frame_path = f"{output_folder}/frame_{frame_count}.png"
+                cv2.imwrite(frame_path, image)
+                image_paths.append(os.path.abspath(frame_path))
+            
+            # Skip to the next frame for the next interval
             success, image = cap.read()
+            current_frame += 1
 
         cap.release()
-        print(f"{num_frames} frames captured.")
+        print(f"Frames captured at {interval}-second intervals.")
     except Exception as e:
         print(f"Error capturing frames: {e}")
 
     return image_paths
-
 def text_to_speech(text):
     # Initialize gTTS with the text to convert
     speech = gTTS(text)
@@ -205,30 +217,52 @@ def text_to_speech(text):
 
 def images_to_video(image_folder_path: str, fps, extension:str, video_name:str, output_format:str, summary:str):
     try:
-        movie_clip = moviepy.video.io.ImageSequenceClip.ImageSequenceClip(image_folder_path, fps)
-        movie_clip.write_videofile(video_name+output_format)
-        video_clip = VideoFileClip("summary_video.mp4")
-        #audio file
-        audio_clip_file = text_to_speech(summary)
+        # Ensure the static folder exists
+        if not os.path.exists("static"):
+            os.makedirs("static")
+
+        # Assuming text_to_speech returns the path to the generated audio file
+        audio_clip_file = text_to_speech(summary) 
         audio_clip = AudioFileClip(audio_clip_file)
+        audio_duration = audio_clip.duration
+
+        # List images in the folder
+        images = [img for img in os.listdir(image_folder_path) if img.endswith(extension)]
+        images.sort()  # Make sure that the images are sorted in order
+        images_path = [os.path.join(image_folder_path, img) for img in images]
+
+        # Calculate FPS based on audio duration and number of images
+        if images:
+            fps = len(images) / audio_duration
+        else:
+            return {"success": False, "errors": "No images found in the folder"}
+
+        # Create video clip from images
+        video_clip = ImageSequenceClip(images_path, fps=fps)
+
+        # If the generated video is longer than the audio, trim the video to match audio duration
+        if video_clip.duration > audio_duration:
+            video_clip = video_clip.subclip(0, audio_duration)
+
+        # Set audio to the video clip
         final_clip = video_clip.set_audio(audio_clip)
-        video_file = final_clip.write_videofile("static/youtube_v" + ".mp4")
-        return {"success": True, "message" : "Youtube Summary video created successfully", "video_file": "youtube_v.mp4"}
+
+        # Write the final video file, ensuring it's saved within the "static" folder
+        final_video_path = f"{video_name}{output_format}"
+        # final_clip.write_videofile(final_video_path)
+        final_clip.write_videofile(f"static/{final_video_path}")
+
+        return {"success": True, "message": "YouTube Summary video created successfully", "video_file": final_video_path}
     except Exception as e:
         return {"success": False, "errors": f"Error creating video: {str(e)}"}
     
 
 def get_youtube_video_id(link):
 
- 
-    patterns = [
-        r"youtube\.com/watch\?.*?v=([^&#]*)",  # Standard watch links
-        r"youtu\.be/([^?#]*)",  # Shortened links
-    ]
- 
-    for pattern in patterns:
-        match = re.search(pattern, link)
-        if match:
-            return match.group(1)
- 
-    return None
+  # Regular expression pattern to match the video ID
+    pattern = r'(?<=v=)[\w-]+'
+    match = re.search(pattern, link)
+    if match:
+        return match.group(0)
+    else:
+        return None
