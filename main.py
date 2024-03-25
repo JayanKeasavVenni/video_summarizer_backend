@@ -1,5 +1,6 @@
 import shutil
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException
+from mangum import Mangum
 from fastapi.staticfiles import StaticFiles
 from moviepy.editor import *
 from gtts import gTTS
@@ -29,6 +30,7 @@ import re
 load_dotenv()
 
 app = FastAPI()
+handler = Mangum(app)
 
 
 # Allow all origins, methods, and headers for testing purposes.
@@ -99,37 +101,61 @@ async def root():
     return {"message": "Welcome"}
 
 
+def split_text_into_chunks(text, chunk_size):
+    words = re.findall(r'\S+\s*', text)
+    chunks = []
+    current_chunk = ""
+    current_length = 0
+
+    for word in words:
+        word_length = len(word)
+        if current_length + word_length + 1 <= chunk_size:  # Add 1 for space after the word
+            if current_chunk:  # Add space before adding a word if not the first word
+                current_chunk += " "
+                current_length += 1
+            current_chunk += word
+            current_length += word_length
+        else:
+            chunks.append(current_chunk.strip())
+            current_chunk = word
+            current_length = word_length
+
+    if current_chunk:
+        chunks.append(current_chunk.strip())
+    print("chunk length", len(chunks))
+    return chunks
+
 @app.get("/process_video")
 async def process_video(video_url: str, num_frames: int = 10):
     try:
         # Extract video ID from the video link
         video_id = get_youtube_video_id(video_url)
-        print("video_id",video_id)
+        print("video_id", video_id)
         # Get the transcript for the video
         videoExist = check_file_exists(video_id, ".mp4")
-        print(videoExist,"ss")
-        if not videoExist : 
-            youtube = build('youtube', 'v3', developerKey=yt_api_key)
-            captions = youtube.captions().list(part='snippet', videoId=video_id).execute()
-            if 'items' in captions and captions['items']:
-                caption = captions['items'][0]['id']
-            else:
-                caption = None
-
-            video_response = youtube.videos().list(part='snippet', id=video_id).execute()
-            thumbnails = video_response['items'][0]['snippet']['thumbnails']
-
+        print(videoExist, "ss")
+        if not videoExist:
             transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
             transcript_txt = ""
 
+            # Concatenate all transcript text into one string
             for transcript in transcript_list:
                 transcript_txt += transcript['text']
 
-            summary = ""
-            images = []
+            # Print the length of the text
+            print("Length of the text:", len(transcript_txt))
 
-            if transcript_txt != "":
-                # Log in to huggingface and grant authorization to huggingchat
+            # Define initial chunk size in characters
+            chunk_size = 10000  # Start with a moderately sized chunk
+
+            # Split the transcript into smaller chunks based on characters
+            chunks = split_text_into_chunks(transcript_txt, chunk_size)
+
+            final_summary = ""
+
+            # Summarize each chunk and append to the final summary
+            for chunk in chunks:
+                # Your summarization logic here
                 sign = Login(huggingface_username, huggingface_pwd)
                 cookies = sign.login()
 
@@ -141,78 +167,82 @@ async def process_video(video_url: str, num_frames: int = 10):
                 chatbot = hugchat.ChatBot(cookies=cookies.get_dict())
 
                 # Extract the summary from the response
-                message = chatbot.query(
-                    "Summarize in 10 lines if the given data is more than 10 lines: " + transcript_txt)
-                print(message[0],'ytr')
+                message = chatbot.query("Summarize in 10 lines if the given data is more than 10 lines: " + chunk)
+                print(message[0], 'ytr')
                 # Extract the text from the Message object
-                summary = message.text if hasattr(
-                    message, 'text') else str(message)
+                summary = message.text if hasattr(message, 'text') else str(message)
+
+                # Append the summarized chunk to the final summary
+                final_summary += summary + "\n"
 
             try:
                 # Capture frames directly from the YouTube video stream
                 output_frames_folder = "frames"
-                images = capture_frames(
-                    video_url, output_frames_folder, num_frames)
+                images = capture_frames(video_url, output_frames_folder, num_frames)
             except Exception as e:
                 print(f"Error capturing frames: {e}")
+
             video_file = None
-            if summary is not None and images is not None:
-                video_generation = images_to_video("frames", 54, '.png', video_id, '.mp4', summary) 
+            if final_summary and images:
+                video_generation = images_to_video("frames", 54, '.png', video_id, '.mp4', final_summary)
                 if video_generation is not None and 'errors' in video_generation:
-                    return JSONResponse(content={ "success": False, "errors": video_generation['errors']})
+                    return JSONResponse(content={"success": False, "errors": video_generation['errors']})
                 else:
                     video_file = video_generation['video_file']
-            return JSONResponse(content={ "success": True,"summary": summary, "images": images, "video_file": video_file})
-        else :
-            video_file=f'{video_id}.mp4'
-            return JSONResponse(content={ "success": True, "video_file": video_file})
+            return JSONResponse(content={"success": True, "summary": final_summary, "images": images, "video_file": video_file})
+        else:
+            video_file = f'{video_id}.mp4'
+            return JSONResponse(content={"success": True, "video_file": video_file})
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Error processing video: {str(e)}")
 
 
-def capture_frames(video_url, output_folder='frames', interval=10):
-    if  os.path.exists(output_folder):
+def capture_frames(video_url, output_folder='frames', max_frames=10):
+    if os.path.exists(output_folder):
         shutil.rmtree(output_folder)
-    else:
+    os.makedirs(output_folder)
+
+    try:
+        # Initialize pytube to capture video stream
+        yt = YouTube(video_url)
+        stream = yt.streams.filter(file_extension='mp4', res='360p').first()
+
+        # Use OpenCV to capture frames from the video stream
+        cap = cv2.VideoCapture(stream.url)
+        
+        # Calculate total frames in the video
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        # Calculate the frame interval to capture 10 frames evenly
+        frame_interval = max(total_frames // max_frames, 1)
+
+        frame_count = 0
         image_paths = []
-        # Ensure that the directory exists or create it
-        if not os.path.exists(output_folder):
-            os.makedirs(output_folder)
 
-        try:
-            # Initialize pytube to capture video stream
-            yt = YouTube(video_url)
-            stream = yt.streams.filter(file_extension='mp4', res='360p').first()
+        success, image = cap.read()
+        current_frame = 0
 
-            # Use OpenCV to capture frames from the video stream
-            cap = cv2.VideoCapture(stream.url)
+        while success and frame_count < max_frames:
+            # Capture frame if it's on the desired interval
+            if current_frame % frame_interval == 0:
+                frame_count += 1
+                frame_path = f"{output_folder}/frame_{frame_count}.png"
+                cv2.imwrite(frame_path, image)
+                image_paths.append(os.path.abspath(frame_path))
 
-            # Calculate the number of frames to skip based on the desired interval (10 seconds)
-            fps = cap.get(cv2.CAP_PROP_FPS)  # Frame rate
-            skip_frames = int(fps * interval)
-            frame_count = 0
+            # Read the next frame
             success, image = cap.read()
-            current_frame = 0
+            current_frame += 1
 
-            while success:
-                # Capture frame if it's on the desired interval
-                if current_frame % skip_frames == 0:
-                    frame_count += 1
-                    frame_path = f"{output_folder}/frame_{frame_count}.png"
-                    cv2.imwrite(frame_path, image)
-                    image_paths.append(os.path.abspath(frame_path))
-                
-                # Skip to the next frame for the next interval
-                success, image = cap.read()
-                current_frame += 1
-
-            cap.release()
-            print(f"Frames captured at {interval}-second intervals.")
-        except Exception as e:
-            print(f"Error capturing frames: {e}")
-
+        cap.release()
+        print(f"{frame_count} frames captured.")
         return image_paths
+
+    except Exception as e:
+        print(f"Error capturing frames: {e}")
+        return []
+
 def text_to_speech(text):
     # Initialize gTTS with the text to convert
     speech = gTTS(text)
