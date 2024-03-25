@@ -168,7 +168,7 @@ async def process_video(video_url: str, num_frames: int = 10):
 
                 # Extract the summary from the response
                 message = chatbot.query("Summarize in 10 lines if the given data is more than 10 lines: " + chunk)
-                print(message[0], 'ytr')
+                print(message, 'ytr')
                 # Extract the text from the Message object
                 summary = message.text if hasattr(message, 'text') else str(message)
 
