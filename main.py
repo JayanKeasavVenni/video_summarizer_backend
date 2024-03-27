@@ -5,13 +5,13 @@ from fastapi.staticfiles import StaticFiles
 from moviepy.editor import *
 from gtts import gTTS
 import os
-import json, openai, pandas
+import json
+import pandas as pd
 import numpy as np
 import warnings
 import moviepy.video.io.ImageSequenceClip
 import pygame
-warnings.filterwarnings('ignore')
-import configparser
+from transformers import pipeline
 from fastapi.responses import JSONResponse
 from requests import request
 from dotenv import load_dotenv
@@ -19,13 +19,15 @@ from googleapiclient.discovery import build
 from pytube import YouTube
 from youtube_transcript_api import YouTubeTranscriptApi
 import cv2
-from hugchat.login import Login
-from hugchat import hugchat
-from hugchat.message import Message
+# from hugchat.login import Login
+# from hugchat import hugchat
+# from hugchat.message import Message
 
 import openai
 from fastapi.middleware.cors import CORSMiddleware
 import re
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
 
 load_dotenv()
 
@@ -89,8 +91,6 @@ async def generate_video(request: Request) :
 
 # Setting API keys
 yt_api_key = os.environ.get("yt_api_key")
-huggingface_username = os.environ.get("huggingface_username")
-huggingface_pwd = os.environ.get("huggingface_pwd")
 openai_api_key = os.environ.get("openai_api_key")
 
 # Set OpenAI API key
@@ -125,6 +125,12 @@ def split_text_into_chunks(text, chunk_size):
     print("chunk length", len(chunks))
     return chunks
 
+# Summarization to a separate function
+async def summarize_text_chunks(chunks, summarizer):
+    loop = asyncio.get_event_loop()
+    tasks = [loop.run_in_executor(None, summarizer, chunk, 150, 30, False) for chunk in chunks]
+    return await asyncio.gather(*tasks)
+
 @app.get("/process_video")
 async def process_video(video_url: str, num_frames: int = 10):
     try:
@@ -142,39 +148,27 @@ async def process_video(video_url: str, num_frames: int = 10):
             for transcript in transcript_list:
                 transcript_txt += transcript['text']
 
-            # Print the length of the text
-            print("Length of the text:", len(transcript_txt))
+            # Split the transcript into chunks
+            chunks = split_text_into_chunks(transcript_txt, 2000)
 
-            # Define initial chunk size in characters
-            chunk_size = 10000  # Start with a moderately sized chunk
+            # Summarize the transcript using BERT Extractive Summarizer
+            summarizer = pipeline("summarization", model="facebook/bart-large-cnn", revision="main")
+            summarized_chunks = await summarize_text_chunks(chunks, summarizer)
 
-            # Split the transcript into smaller chunks based on characters
-            chunks = split_text_into_chunks(transcript_txt, chunk_size)
+            # Convert list of lists to a single list
+            flattened_chunks = []
+            for sublist in summarized_chunks:
+                for chunk in sublist:
+                    if isinstance(chunk, dict) and 'summary_text' in chunk:
+                        flattened_chunks.append(chunk['summary_text'])
+                    elif isinstance(chunk, list) and chunk:
+                        flattened_chunks.append(chunk[0]['summary_text'])
+                    else:
+                        print("Unexpected structure in summarized_chunks:", chunk)
 
-            final_summary = ""
-
-            # Summarize each chunk and append to the final summary
-            for chunk in chunks:
-                # Your summarization logic here
-                sign = Login(huggingface_username, huggingface_pwd)
-                cookies = sign.login()
-
-                # Save cookies to the local directory
-                cookie_path_dir = "./cookies_snapshot"
-                sign.saveCookiesToDir(cookie_path_dir)
-
-                # Create a ChatBot
-                chatbot = hugchat.ChatBot(cookies=cookies.get_dict())
-
-                # Extract the summary from the response
-                message = chatbot.query("Summarize in 10 lines if the given data is more than 10 lines: " + chunk)
-                print(message, 'ytr')
-                # Extract the text from the Message object
-                summary = message.text if hasattr(message, 'text') else str(message)
-
-                # Append the summarized chunk to the final summary
-                final_summary += summary + "\n"
-
+            # Join the summarized chunks into a single string
+            final_summary = "\n".join(flattened_chunks)
+            print("summarize done")
             try:
                 # Capture frames directly from the YouTube video stream
                 output_frames_folder = "frames"
@@ -194,8 +188,7 @@ async def process_video(video_url: str, num_frames: int = 10):
             video_file = f'{video_id}.mp4'
             return JSONResponse(content={"success": True, "video_file": video_file})
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error processing video: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error processing video: {str(e)}")
 
 
 def capture_frames(video_url, output_folder='frames', max_frames=10):
