@@ -5,6 +5,8 @@ from fastapi.staticfiles import StaticFiles
 from moviepy.editor import *
 from gtts import gTTS
 import os
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+import tensorflow as tf
 import json
 import pandas as pd
 import numpy as np
@@ -22,7 +24,9 @@ import cv2
 # from hugchat.login import Login
 # from hugchat import hugchat
 # from hugchat.message import Message
-
+import warnings
+# Suppress the warning
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 import openai
 from fastapi.middleware.cors import CORSMiddleware
 import re
