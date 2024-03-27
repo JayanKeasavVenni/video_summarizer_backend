@@ -6,7 +6,6 @@ from moviepy.editor import *
 from gtts import gTTS
 import os
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
-import tensorflow as tf
 import json
 import pandas as pd
 import numpy as np
